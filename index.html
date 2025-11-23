@@ -1,12 +1,273 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-    <title>Cosmic Clock Sandbox</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src_main.jsx"></script>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Cosmic Clock — Live</title>
+  <style>
+    :root {
+      --bg1: #05051a;
+      --bg2: #0b1230;
+      --accent: #76e4f7;
+      --muted: rgba(255,255,255,0.08);
+    }
+    html,body { height:100%; margin:0; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; color: #e9f6ff; background: linear-gradient(180deg,var(--bg1),var(--bg2)); }
+    .wrap { position:relative; height:100vh; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    canvas { display:block; width:100%; height:100%; }
+    .overlay {
+      position:absolute; left:1rem; top:1rem; z-index:5; background:rgba(0,0,0,0.25); padding:.5rem .75rem; border-radius:10px; backdrop-filter: blur(6px);
+      box-shadow:0 6px 20px rgba(0,0,0,0.5);
+    }
+    .overlay h1 { margin:0; font-size:1rem; line-height:1; letter-spacing:.6px; }
+    .overlay p { margin:0; font-size:.8rem; color: #cfeefb; opacity:.9; }
+    .legend { position:absolute; right:1rem; bottom:1rem; z-index:6; color: #cfeefb; background: rgba(0,0,0,0.18); padding:.5rem .7rem; border-radius:8px; font-size: .85rem; }
+    .credits { position:absolute; left:1rem; bottom:1rem; z-index:6; font-size:.75rem; color:rgba(255,255,255,0.6); }
+    .cta { position:absolute; right:1rem; top:1rem; z-index:6; font-size:.8rem; color:#bfefff; background:rgba(0,0,0,0.14); padding:.4rem .6rem; border-radius:8px; }
+    @media (max-width:600px) {
+      .overlay h1 { font-size:.95rem }
+      .legend { font-size:.78rem }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap" id="wrap">
+    <canvas id="c"></canvas>
+
+    <div class="overlay">
+      <h1>Cosmic Clock</h1>
+      <p id="timeText">—</p>
+    </div>
+
+    <div class="cta">Click / Tap to toggle speed</div>
+    <div class="legend">Outer: Hours • Middle: Minutes • Inner: Seconds</div>
+    <div class="credits">Created from gist → cosmic-clock</div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  let W = 0, H = 0, cx = 0, cy = 0, DPR = Math.max(1, window.devicePixelRatio || 1);
+  const stars = [];
+  const STAR_COUNT = 220;
+  let tick = 0;
+  let speed = 1; // 1 = real time, higher = faster
+  const ringCfg = [
+    { radiusFactor: 0.38, width: 18, type: 'hours', color: '#ffd97a' },
+    { radiusFactor: 0.25, width: 14, type: 'minutes', color: '#76e4f7' },
+    { radiusFactor: 0.12, width: 10, type: 'seconds', color: '#9be88f' }
+  ];
+
+  function onResize(){
+    W = canvas.clientWidth | 0;
+    H = canvas.clientHeight | 0;
+    canvas.width = Math.max(300, W * DPR);
+    canvas.height = Math.max(300, H * DPR);
+    cx = canvas.width / 2;
+    cy = canvas.height / 2;
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+
+  function rand(min, max){ return Math.random() * (max - min) + min; }
+
+  function initStars(){
+    stars.length = 0;
+    for(let i=0;i<STAR_COUNT;i++){
+      stars.push({
+        x: Math.random(),
+        y: Math.random(),
+        z: Math.random()**2,
+        size: Math.random()*1.5 + 0.2,
+        twinkle: Math.random()*0.6 + 0.2
+      });
+    }
+  }
+
+  function drawStarfield(){
+    // subtle gradient background
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#040414');
+    g.addColorStop(1,'#07102a');
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,W,H);
+
+    // distant glow
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W,H) * 0.8);
+    grad.addColorStop(0, 'rgba(20,18,40,0.15)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,W,H);
+
+    // stars
+    for(const s of stars){
+      const x = (s.x - 0.5) * W + cx;
+      const y = (s.y - 0.5) * H + cy;
+      const alpha = 0.4 + 0.6 * Math.abs(Math.sin((tick * 0.002 * s.twinkle) + s.z*10));
+      ctx.globalAlpha = alpha * (0.6 + s.z*0.6);
+      const rad = s.size * (1 + s.z*1.2);
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(255, 255, 255, 1)`;
+      ctx.arc(x, y, rad, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawRings(now){
+    const maxR = Math.min(W, H) * 0.45;
+    for(let i=0;i<ringCfg.length;i++){
+      const rCfg = ringCfg[i];
+      const R = maxR * rCfg.radiusFactor;
+      ctx.save();
+      // subtle rotating base
+      ctx.translate(cx, cy);
+      ctx.rotate( (tick * 0.0002 * (i+1)) );
+      // ring shadow
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      ctx.lineWidth = rCfg.width + 6;
+      ctx.lineCap = 'round';
+      ctx.arc(0,0,R,0,Math.PI*2);
+      ctx.stroke();
+
+      // ring background track
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+      ctx.lineWidth = rCfg.width;
+      ctx.arc(0,0,R,0,Math.PI*2);
+      ctx.stroke();
+
+      // compute progress
+      let progress = 0;
+      if(rCfg.type === 'hours'){
+        const h = now.getHours() % 12; // 12-hour
+        progress = (h*3600 + now.getMinutes()*60 + now.getSeconds()) / (12*3600);
+      } else if(rCfg.type === 'minutes'){
+        progress = (now.getMinutes()*60 + now.getSeconds()) / (60*60);
+      } else if(rCfg.type === 'seconds'){
+        progress = (now.getSeconds() + now.getMilliseconds()/1000) / 60;
+      }
+      progress = (progress * speed) % 1;
+
+      // active arc
+      ctx.beginPath();
+      const start = -Math.PI/2;
+      const end = start + progress * Math.PI * 2;
+      const grad = ctx.createLinearGradient(-R, -R, R, R);
+      grad.addColorStop(0, rCfg.color);
+      grad.addColorStop(1, 'rgba(255,255,255,0.92)');
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = rCfg.width;
+      ctx.lineCap = 'round';
+      ctx.arc(0,0,R,start,end);
+      ctx.stroke();
+
+      // markers (ticks)
+      const ticks = rCfg.type === 'hours' ? 12 : 60;
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      for(let t=0;t<ticks;t++){
+        const a = (t / ticks) * Math.PI * 2 + start;
+        const x1 = Math.cos(a) * (R - rCfg.width/2 - 6);
+        const y1 = Math.sin(a) * (R - rCfg.width/2 - 6);
+        const x2 = Math.cos(a) * (R + rCfg.width/2 + 2);
+        const y2 = Math.sin(a) * (R + rCfg.width/2 + 2);
+        ctx.beginPath();
+        ctx.moveTo(x1,y1);
+        ctx.lineTo(x2,y2);
+        ctx.stroke();
+      }
+
+      // central glowing point at the arc end
+      const endAngle = end;
+      const px = Math.cos(endAngle) * R;
+      const py = Math.sin(endAngle) * R;
+      ctx.beginPath();
+      ctx.fillStyle = rCfg.color;
+      ctx.globalAlpha = 0.95;
+      ctx.arc(px, py, Math.max(4, rCfg.width/3), 0, Math.PI*2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      ctx.restore();
+    }
+  }
+
+  function drawCenter(now){
+    ctx.save();
+    ctx.translate(cx, cy);
+    // small central planet
+    const baseR = Math.min(W,H) * 0.05;
+    const g = ctx.createRadialGradient(-baseR*0.3, -baseR*0.3, baseR*0.1, 0,0, baseR);
+    g.addColorStop(0, '#e6faff');
+    g.addColorStop(0.45, '#76e4f7');
+    g.addColorStop(1, '#0b2a3d');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0,0, baseR, 0, Math.PI*2);
+    ctx.fill();
+
+    // orbiting moon
+    const moonR = baseR * 0.18;
+    const moonOrbit = baseR * 1.9;
+    const moonAngle = (tick * 0.0015) % (Math.PI*2);
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.arc(Math.cos(moonAngle)*moonOrbit, Math.sin(moonAngle)*moonOrbit, moonR, 0, Math.PI*2);
+    ctx.fill();
+
+    // central time text
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.font = `${Math.max(14, baseR*0.38)}px Inter, system-ui, -apple-system`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const hh = now.getHours().toString().padStart(2,'0');
+    const mm = now.getMinutes().toString().padStart(2,'0');
+    const ss = now.getSeconds().toString().padStart(2,'0');
+    ctx.fillText(`${hh}:${mm}:${ss}`, 0, baseR*0.04);
+    ctx.restore();
+  }
+
+  function updateOverlayText(now){
+    const el = document.getElementById('timeText');
+    const str = now.toLocaleString(undefined, { weekday:'short', year:'numeric', month:'short', day:'numeric' });
+    el.textContent = `${str} — speed x${speed.toFixed(1)}`;
+  }
+
+  function animate(ts){
+    tick = ts;
+    const now = new Date(Date.now() * speed);
+    drawStarfield();
+    drawRings(now);
+    drawCenter(now);
+    updateOverlayText(new Date());
+    requestAnimationFrame(animate);
+  }
+
+  // interactivity: click to toggle speed modes
+  const speeds = [1, 8, 32, 128];
+  let speedIndex = 0;
+  function toggleSpeed(){
+    speedIndex = (speedIndex + 1) % speeds.length;
+    speed = speeds[speedIndex];
+    const cta = document.querySelector('.cta');
+    cta.textContent = `Click / Tap to toggle speed — x${speed}`;
+  }
+
+  // init
+  function init(){
+    onResize();
+    initStars();
+    window.addEventListener('resize', onResize);
+    canvas.addEventListener('click', toggleSpeed);
+    canvas.addEventListener('touchstart', (e)=>{ e.preventDefault(); toggleSpeed(); }, {passive:false});
+    requestAnimationFrame(animate);
+  }
+
+  // helpful: if page is loaded in a small embed, center properly
+  document.addEventListener('DOMContentLoaded', init);
+})();
+</script>
+</body>
 </html>
+
